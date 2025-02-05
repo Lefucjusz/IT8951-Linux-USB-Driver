@@ -31,6 +31,7 @@ struct it8951_device
     uint8_t bulk_in_addr;
     uint8_t bulk_out_addr;
     size_t bulk_out_size;
+    bool connected;
 
     /* IT8951-related data */
     uint32_t img_mem_addr;
@@ -43,6 +44,7 @@ struct it8951_device
     struct fb_info *fbinfo;
     uint8_t *fb_video_buf;
     size_t fb_video_buf_size;
+    uint32_t pseudo_palette[16];
 };
 
 struct it8951_dev_info

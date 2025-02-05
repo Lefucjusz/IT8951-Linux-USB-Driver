@@ -35,7 +35,6 @@ MODULE_INFO(retpoline, "Y");
 
 static const struct modversion_info ____versions[]
 __used __section("__versions") = {
-	{ 0x82d424fa, "usb_deregister" },
 	{ 0x122c3a7e, "_printk" },
 	{ 0x258279d5, "fb_sys_write" },
 	{ 0x2d3385d3, "system_wq" },
@@ -56,8 +55,8 @@ __used __section("__versions") = {
 	{ 0xf012d9a9, "register_framebuffer" },
 	{ 0x8738c14f, "fb_sys_read" },
 	{ 0xbdfb6dbb, "__fentry__" },
-	{ 0xc512a579, "usb_register_driver" },
 	{ 0x5b8239ca, "__x86_return_thunk" },
+	{ 0xc512a579, "usb_register_driver" },
 	{ 0x6d169046, "_dev_info" },
 	{ 0xf92efe43, "fb_deferred_io_cleanup" },
 	{ 0x217f722f, "unregister_framebuffer" },
@@ -66,6 +65,7 @@ __used __section("__versions") = {
 	{ 0x37a0cba, "kfree" },
 	{ 0x79853de5, "usb_bulk_msg" },
 	{ 0xf0fdf6cb, "__stack_chk_fail" },
+	{ 0x82d424fa, "usb_deregister" },
 	{ 0x6ad2b3e, "module_layout" },
 };
 
@@ -73,4 +73,4 @@ MODULE_INFO(depends, "");
 
 MODULE_ALIAS("usb:v048Dp8951d*dc*dsc*dp*ic*isc*ip*in*");
 
-MODULE_INFO(srcversion, "79D9850FD22037BD5A9D7E2");
+MODULE_INFO(srcversion, "7BB286CF21514725A79976F");

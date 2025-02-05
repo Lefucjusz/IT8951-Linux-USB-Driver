@@ -12,6 +12,7 @@
 // TODO check gotos and memory freeing
 // TODO optimize data loading time
 // TODO add partial updates
+// TODO clear display before disconnecting
 
 /* Driver name */
 #define IT8951_DRV_ID "eink_usb_disp"
@@ -337,62 +338,30 @@ out_error:
 static void it8951_display_update(struct fb_info *info, struct list_head *pagelist)
 {
     struct it8951_device *dev = info->par;
-//    struct fb_deferred_io_pageref *pageref;
-//    size_t y1, y2;
-//    size_t width, height;
-    uint8_t r, g, b;
-//    size_t min_y = SIZE_MAX;
-//    size_t max_y = 0;
-//    size_t offset;
-//
-//    if (list_empty(pagelist)) {
-//        dev_err(&dev->interface->dev, "Requested refresh with empty pages list!\n");
-//        return;
-//    }
-//
-//    /* Compute size of refresh rectangle enclosing all refreshed pages */
-//    list_for_each_entry(pageref, pagelist, list) {
-//        /* Compute page span across y axis */
-//        y1 = pageref->offset / info->fix.line_length;
-//        y2 = (pageref->offset + PAGE_SIZE) / info->fix.line_length;
-//
-//        /* Clip to screen size */
-//        if (y2 >= info->var.yres) {
-//            y2 = info->var.yres - 1;
-//        }
-//
-//        /* Update span */
-//        if (y1 < min_y) {
-//            min_y = y1;
-//        }
-//        if (y2 > max_y) {
-//            max_y = y2;
-//        }
-//    }
-//    width = info->var.xres;
-//    height = max_y - min_y;
 
-    /* Convert from RGB332 to grayscale */
-    for (size_t i = 0; i < dev->width * dev->height; ++i) {
-//        offset = i + width * min_y;
-//        r = (dev->fb_video_buf[i] >> 5) & 0x07;
-//        g = (dev->fb_video_buf[i] >> 2) & 0x07;
-//        b = (dev->fb_video_buf[i] >> 0) & 0x03;
-//
-//        dev->img_video_buf[i] = (11 * r) + (21 * g) + (10 * b);
-
-        dev->img_video_buf[i] = dev->fb_video_buf[i];
+    /* Prevent crash on USB disconnection */
+    if (!dev->connected) {
+        return;
     }
 
-//    printk("Loading from origin (%d; %d), width: %d, height: %d\n", 0, min_y, width, height);
+    if (list_empty(pagelist)) {
+        dev_err(&dev->interface->dev, "Requested refresh with empty pages list!\n");
+//        return;
+    }
 
-//    ktime_t s = ktime_get_ns();
-    int ret = it8951_image_load(dev, dev->img_video_buf, 0, 0, dev->width, dev->height);
-//    ktime_t e = ktime_get_ns();
-//    printk("ret load: %d, time: %ums\n", ret, (e - s) / 1000000);
+    // TODO convert to grayscale
 
-    ret = it8951_display_refresh(dev, 2, 0, 0, dev->width, dev->height); // TODO check return
-    printk("ret refresh: %d\n", ret);
+    /* Mirror image */
+    for (size_t i = 0; i < dev->width * dev->height; ++i) {
+	    size_t row = i / info->fix.line_length;
+        size_t pixel = i % info->fix.line_length;
+        size_t img_offset = (row + 1) * info->fix.line_length - pixel - 1;
+
+        dev->img_video_buf[img_offset] = dev->fb_video_buf[i];
+    }
+
+    it8951_image_load(dev, dev->img_video_buf, 0, 0, 1440, 720);
+    it8951_display_refresh(dev, 2, 0, 0, 1440, 720); // TODO check return
 }
 
 static ssize_t it8951_write(struct fb_info *p, const char __user *buf, size_t count, loff_t *ppos)
@@ -422,9 +391,37 @@ static void it8951_copyarea(struct fb_info *p, const struct fb_copyarea *area)
 
 static void it8951_imageblit(struct fb_info *p, const struct fb_image *image)
 {
-    printk("imageblit\n");
+    printk("imageblit x: %d y: %d w: %d h: %d\n", image->dx, image->dy, image->width, image->height);
     sys_imageblit(p, image);
     schedule_delayed_work(&p->deferred_work, p->fbdefio->delay);
+}
+
+/* This is needed for fbcon to work */
+static int it8951_setcolreg(unsigned regno, unsigned r, unsigned g, unsigned b, unsigned alpha, struct fb_info *info)
+{
+    uint32_t val;
+
+    if (regno > 255) {
+        return -EINVAL;
+    }
+
+    // TODO grayscale
+    // TODO clean those magic numbers up
+
+    /* Create pseudo-palette */
+    if (info->fix.visual == FB_VISUAL_TRUECOLOR) {
+        if (regno > 15) {
+            return -EINVAL;
+        }
+
+        val = (r << 5);
+        val |= (g << 2);
+        val |= (b << 0);
+
+        ((uint32_t *)info->pseudo_palette)[regno] = val;
+    }
+
+    return 0;
 }
 
 static struct fb_ops it8951_fb_fops = {
@@ -433,7 +430,8 @@ static struct fb_ops it8951_fb_fops = {
         .fb_write = it8951_write,
         .fb_fillrect = it8951_fillrect,
         .fb_copyarea = it8951_copyarea,
-        .fb_imageblit = it8951_imageblit
+        .fb_imageblit = it8951_imageblit,
+	    .fb_setcolreg = it8951_setcolreg
 };
 
 static struct fb_deferred_io it8951_fb_defio = {
@@ -550,7 +548,7 @@ static int it8951_drv_usb_probe(struct usb_interface *interface, const struct us
     dev->fbinfo->fix = it8951_fix;
     dev->fbinfo->var = it8951_var;
     dev->fbinfo->fbdefio = &it8951_fb_defio;
-    dev->fbinfo->pseudo_palette = NULL; // TODO what's this?
+    dev->fbinfo->pseudo_palette = dev->pseudo_palette;
     dev->fbinfo->flags = FBINFO_VIRTFB;
 
     /* Initialize deferred IO */
@@ -563,7 +561,8 @@ static int it8951_drv_usb_probe(struct usb_interface *interface, const struct us
         goto fb_error;
     }
 
-//    printk("npagerefs: %d\n", dev->fbinfo->fbdefio->npagerefs);
+    /* Success! */
+    dev->connected = true;
 
     dev_info(&interface->dev, "IT8951 E-Ink USB display connected!\n");
     goto success;
@@ -595,6 +594,9 @@ static void it8951_drv_usb_disconnect(struct usb_interface *interface)
 
     if (dev != NULL) {
         dev_info(&interface->dev, "Cleaning up...\n");
+
+        /* Device is not connected anymore */
+        dev->connected = false;
 
         /* Cleanup deferred IO */
         fb_deferred_io_cleanup(dev->fbinfo);
