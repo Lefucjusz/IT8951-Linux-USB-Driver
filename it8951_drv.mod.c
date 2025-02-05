@@ -46,9 +46,9 @@ __used __section("__versions") = {
 	{ 0x4c03a563, "random_kmalloc_seed" },
 	{ 0x24980310, "kmalloc_caches" },
 	{ 0x1d199deb, "kmalloc_trace" },
-	{ 0x5bd0f510, "_dev_err" },
 	{ 0xf8d67447, "usb_get_dev" },
 	{ 0x93c7edeb, "usb_find_common_endpoints" },
+	{ 0x5bd0f510, "_dev_err" },
 	{ 0x978b073b, "framebuffer_alloc" },
 	{ 0xd6ee688f, "vmalloc" },
 	{ 0xeb233a45, "__kmalloc" },
@@ -73,4 +73,4 @@ MODULE_INFO(depends, "");
 
 MODULE_ALIAS("usb:v048Dp8951d*dc*dsc*dp*ic*isc*ip*in*");
 
-MODULE_INFO(srcversion, "F6F9F9ECCE28094D28B208B");
+MODULE_INFO(srcversion, "79D9850FD22037BD5A9D7E2");

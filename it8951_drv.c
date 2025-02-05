@@ -337,59 +337,61 @@ out_error:
 static void it8951_display_update(struct fb_info *info, struct list_head *pagelist)
 {
     struct it8951_device *dev = info->par;
-    struct fb_deferred_io_pageref *pageref;
-    size_t y1, y2;
-    size_t width, height;
+//    struct fb_deferred_io_pageref *pageref;
+//    size_t y1, y2;
+//    size_t width, height;
     uint8_t r, g, b;
-    size_t min_y = SIZE_MAX;
-    size_t max_y = 0;
-    size_t offset;
-
-    if (list_empty(pagelist)) {
-        dev_err(&dev->interface->dev, "Requested refresh with empty pages list!\n");
-        return;
-    }
-
-    /* Compute size of refresh rectangle enclosing all refreshed pages */
-    list_for_each_entry(pageref, pagelist, list) {
-        /* Compute page span across y axis */
-        y1 = pageref->offset / info->fix.line_length;
-        y2 = (pageref->offset + PAGE_SIZE) / info->fix.line_length;
-
-        /* Clip to screen size */
-        if (y2 >= info->var.yres) {
-            y2 = info->var.yres - 1;
-        }
-
-        /* Update span */
-        if (y1 < min_y) {
-            min_y = y1;
-        }
-        if (y2 > max_y) {
-            max_y = y2;
-        }
-    }
-    width = info->var.xres;
-    height = max_y - min_y;
+//    size_t min_y = SIZE_MAX;
+//    size_t max_y = 0;
+//    size_t offset;
+//
+//    if (list_empty(pagelist)) {
+//        dev_err(&dev->interface->dev, "Requested refresh with empty pages list!\n");
+//        return;
+//    }
+//
+//    /* Compute size of refresh rectangle enclosing all refreshed pages */
+//    list_for_each_entry(pageref, pagelist, list) {
+//        /* Compute page span across y axis */
+//        y1 = pageref->offset / info->fix.line_length;
+//        y2 = (pageref->offset + PAGE_SIZE) / info->fix.line_length;
+//
+//        /* Clip to screen size */
+//        if (y2 >= info->var.yres) {
+//            y2 = info->var.yres - 1;
+//        }
+//
+//        /* Update span */
+//        if (y1 < min_y) {
+//            min_y = y1;
+//        }
+//        if (y2 > max_y) {
+//            max_y = y2;
+//        }
+//    }
+//    width = info->var.xres;
+//    height = max_y - min_y;
 
     /* Convert from RGB332 to grayscale */
-    for (size_t i = 0; i < width * height; ++i) {
-        offset = i + width * min_y;
-        r = (dev->fb_video_buf[offset] >> 5) & 0x07;
-        g = (dev->fb_video_buf[offset] >> 2) & 0x07;
-        b = (dev->fb_video_buf[offset] >> 0) & 0x03;
+    for (size_t i = 0; i < dev->width * dev->height; ++i) {
+//        offset = i + width * min_y;
+//        r = (dev->fb_video_buf[i] >> 5) & 0x07;
+//        g = (dev->fb_video_buf[i] >> 2) & 0x07;
+//        b = (dev->fb_video_buf[i] >> 0) & 0x03;
+//
+//        dev->img_video_buf[i] = (11 * r) + (21 * g) + (10 * b);
 
-        dev->img_video_buf[offset] = (11 * r) + (21 * g) + (10 * b);
+        dev->img_video_buf[i] = dev->fb_video_buf[i];
     }
 
-    printk("Loading from origin (%d; %d), width: %d, height: %d\n", 0, min_y, width, height);
+//    printk("Loading from origin (%d; %d), width: %d, height: %d\n", 0, min_y, width, height);
 
 //    ktime_t s = ktime_get_ns();
-    int ret = it8951_image_load(dev, &dev->img_video_buf[offset], 0, min_y, width, height);
+    int ret = it8951_image_load(dev, dev->img_video_buf, 0, 0, dev->width, dev->height);
 //    ktime_t e = ktime_get_ns();
 //    printk("ret load: %d, time: %ums\n", ret, (e - s) / 1000000);
 
-    ret = it8951_display_refresh(dev, 2, 0, min_y, width, height); // TODO check return
+    ret = it8951_display_refresh(dev, 2, 0, 0, dev->width, dev->height); // TODO check return
     printk("ret refresh: %d\n", ret);
 }
 
