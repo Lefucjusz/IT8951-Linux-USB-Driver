@@ -30,7 +30,6 @@ struct it8951_device
     struct usb_interface *interface;
     uint8_t bulk_in_addr;
     uint8_t bulk_out_addr;
-    size_t bulk_out_size;
     bool connected;
 
     /* IT8951-related data */

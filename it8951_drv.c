@@ -44,7 +44,7 @@
 /* General defines */
 #define IT8951_DRV_BITS_PER_BYTE 8
 
-#define ROUND_DOWN_TO_MULTIPLE_OF(x, mul) (((x) / (mul)) * (mul))
+#define ROUND_DOWN_TO_MULTIPLE(x, mul) (((x) / (mul)) * (mul))
 
 static const struct usb_device_id it8951_usb_ids[] = {
         {USB_DEVICE(IT8951_DRV_USB_VID, IT8951_DRV_USB_PID)},
@@ -71,32 +71,17 @@ static struct fb_var_screeninfo it8951_var = {
 
 static int it8951_drv_usb_bulk_send(const struct it8951_device *dev, void *data, size_t size)
 {
-    uint8_t *data_ptr = data;
-    size_t bytes_left = size;
-    size_t offset = 0;
-    size_t chunk_size;
     int bytes_received;
-    int ret;
     unsigned pipe;
 
     /* Get send pipe */
     pipe = usb_sndbulkpipe(dev->udev, dev->bulk_out_addr);
 
-    /* Send data in packets */
-    while (bytes_left > 0) {
-        chunk_size = min(bytes_left, dev->bulk_out_size);
-        ret = usb_bulk_msg(dev->udev, pipe, &data_ptr[offset], chunk_size, &bytes_received, IT8951_DRV_USB_TIMEOUT_MS);
-        if (ret != 0) {
-            return -EIO;
-        }
-        bytes_left -= chunk_size;
-        offset += chunk_size;
-    }
-
-    return 0;
+    /* Send data */
+    return usb_bulk_msg(dev->udev, pipe, data, size, &bytes_received, IT8951_DRV_USB_TIMEOUT_MS);
 }
 
-static int it8951_drv_usb_bulk_recv(const struct it8951_device *dev, void *data, size_t size) // TODO fix transfers above packet size
+static int it8951_drv_usb_bulk_recv(const struct it8951_device *dev, void *data, size_t size)
 {
     int bytes_sent;
     unsigned pipe;
@@ -222,7 +207,7 @@ static int it8951_image_load(const struct it8951_device *dev, uint8_t *image, si
     }
 
     /* Maximum transfer size to send an integer number of lines */
-    max_transfer_size = ROUND_DOWN_TO_MULTIPLE_OF(IT8951_DRV_MAX_BLOCK_SIZE - sizeof(*area), w);
+    max_transfer_size = ROUND_DOWN_TO_MULTIPLE(IT8951_DRV_MAX_BLOCK_SIZE - sizeof(*area), w);
 
     /* Total image size */
     total_size = w * h;
@@ -350,6 +335,7 @@ static void it8951_display_update(struct fb_info *info, struct list_head *pageli
     }
 
     // TODO convert to grayscale
+    // TODO optimize this mirroring algorithm
 
     /* Mirror image */
     for (size_t i = 0; i < dev->width * dev->height; ++i) {
@@ -465,7 +451,6 @@ static int it8951_drv_usb_probe(struct usb_interface *interface, const struct us
     }
     dev->bulk_in_addr = bulk_in->bEndpointAddress;
     dev->bulk_out_addr = bulk_out->bEndpointAddress;
-    dev->bulk_out_size = usb_endpoint_maxp(bulk_out);
 
     /* Store pointer to device in interface */
     usb_set_intfdata(interface, dev);
@@ -592,11 +577,11 @@ static void it8951_drv_usb_disconnect(struct usb_interface *interface)
     dev = usb_get_intfdata(interface);
     usb_set_intfdata(interface, NULL);
 
+    /* Device is not connected anymore */
+    dev->connected = false;
+
     if (dev != NULL) {
         dev_info(&interface->dev, "Cleaning up...\n");
-
-        /* Device is not connected anymore */
-        dev->connected = false;
 
         /* Cleanup deferred IO */
         fb_deferred_io_cleanup(dev->fbinfo);
