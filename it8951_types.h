@@ -94,10 +94,5 @@ enum it8951_refresh_mode // TODO these are probably incorrect
 {
     REFRESH_INIT = 0,
     REFRESH_DU2,
-    REFRESH_GC16,
-//    REFRESH_GL16,
-//    REFRESH_GLR16,
-//    REFRESH_GLD16,
-//    REFRESH_DU4,
-//    REFRESH_A2
+    REFRESH_GC16
 };

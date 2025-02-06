@@ -35,13 +35,12 @@ MODULE_INFO(retpoline, "Y");
 
 static const struct modversion_info ____versions[]
 __used __section("__versions") = {
-	{ 0x122c3a7e, "_printk" },
-	{ 0xe6fc7050, "sys_imageblit" },
+	{ 0x258279d5, "fb_sys_write" },
 	{ 0x2d3385d3, "system_wq" },
 	{ 0xb2fcb56d, "queue_delayed_work_on" },
 	{ 0x41b01de4, "sys_fillrect" },
 	{ 0x8c59ea10, "sys_copyarea" },
-	{ 0x258279d5, "fb_sys_write" },
+	{ 0xe6fc7050, "sys_imageblit" },
 	{ 0x4c03a563, "random_kmalloc_seed" },
 	{ 0x24980310, "kmalloc_caches" },
 	{ 0x1d199deb, "kmalloc_trace" },
@@ -74,4 +73,4 @@ MODULE_INFO(depends, "");
 
 MODULE_ALIAS("usb:v048Dp8951d*dc*dsc*dp*ic*isc*ip*in*");
 
-MODULE_INFO(srcversion, "70D9D363D5FFFB23C648865");
+MODULE_INFO(srcversion, "FFA6F6A274B20BB89FFB117");

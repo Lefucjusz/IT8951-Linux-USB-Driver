@@ -10,9 +10,9 @@
 // TODO RGB888 to gray2/gray4
 // TODO add parameter to set VCOM
 // TODO check gotos and memory freeing
-// TODO optimize data loading time
 // TODO add partial updates
 // TODO clear display before disconnecting
+// TODO use grayscale for now and add periodic deep refresh
 
 /* Driver name */
 #define IT8951_DRV_ID "eink_usb_disp"
@@ -56,15 +56,15 @@ MODULE_DEVICE_TABLE(usb, it8951_usb_ids);
 static struct fb_fix_screeninfo it8951_fix = {
         .id = IT8951_DRV_ID,
         .type = FB_TYPE_PACKED_PIXELS,
-        .visual = FB_VISUAL_TRUECOLOR,
+        .visual = FB_VISUAL_MONO10,
         .accel = FB_ACCEL_NONE
 };
 
 static struct fb_var_screeninfo it8951_var = {
-        .bits_per_pixel = 8, /* RGB332 */
-        .red = {5, 3, 0},
-        .green = {2, 3, 0},
-        .blue = {0, 2, 0},
+        .bits_per_pixel = 8, // TODO this can be reduced to 1 probably
+        .red = {0, 1, 0},
+        .green = {0, 1, 0},
+        .blue = {0, 1, 0},
         .activate = FB_ACTIVATE_NOW,
         .vmode = FB_VMODE_NONINTERLACED
 };
@@ -172,92 +172,6 @@ static int it8951_get_info(const struct it8951_device *dev, struct it8951_dev_in
     ret = it8951_read_csw(dev);
 
 out_error:
-    if (cbw != NULL) {
-        kfree(cbw);
-    }
-
-    return ret;
-}
-
-static int it8951_image_load(const struct it8951_device *dev, uint8_t *image, size_t x, size_t y, size_t w, size_t h)
-{
-    struct cmd_block_wrapper *cbw = NULL;
-    struct it8951_ld_img *area = NULL;
-    size_t bytes_sent = 0;
-    size_t max_transfer_size;
-    size_t total_size;
-    size_t lines_sent;
-    size_t chunk_size;
-    int ret;
-
-    /* Create command block wrapper */
-    cbw = it8951_create_cbw(DIR_BULK_OUT, 0);
-    if (cbw == NULL) {
-        ret = -ENOMEM;
-        goto out_error;
-    }
-    cbw->cmd_data[0] = IT8951_DRV_CUSTOM_CMD;
-    cbw->cmd_data[6] = IT8951_DRV_LD_IMG_AREA_OP;
-
-    /* Allocate command data */
-    area = kzalloc(sizeof(*area), GFP_KERNEL);
-    if (area == NULL) {
-        ret = -ENOMEM;
-        goto out_error;
-    }
-
-    /* Maximum transfer size to send an integer number of lines */
-    max_transfer_size = ROUND_DOWN_TO_MULTIPLE(IT8951_DRV_MAX_BLOCK_SIZE - sizeof(*area), w);
-
-    /* Total image size */
-    total_size = w * h;
-
-    /* Send data in bands of IT8951_DRV_MAX_BLOCK_SIZE size */
-    while (bytes_sent < total_size) {
-        chunk_size = min(max_transfer_size, total_size - bytes_sent);
-        lines_sent = bytes_sent / w;
-
-        /* Set data transfer length */
-        cbw->data_transfer_length = chunk_size + sizeof(*area);
-
-        /* Send command block wrapper */
-        ret = it8951_drv_usb_bulk_send(dev, cbw, sizeof(*cbw));
-        if (ret != 0) {
-            goto out_error;
-        }
-
-        /* Set command data */
-        area->img_buf_addr = cpu_to_be32(dev->img_mem_addr);
-        area->x = cpu_to_be32(x);
-        area->y = cpu_to_be32(y + lines_sent);
-        area->w = cpu_to_be32(w);
-        area->h = cpu_to_be32(h - lines_sent);
-
-        /* Send command data */
-        ret = it8951_drv_usb_bulk_send(dev, area, sizeof(*area));
-        if (ret != 0) {
-            goto out_error;
-        }
-
-        /* Send image data */
-        ret = it8951_drv_usb_bulk_send(dev, &image[bytes_sent], chunk_size);
-        if (ret != 0) {
-            goto out_error;
-        }
-
-        /* Check command status */
-        ret = it8951_read_csw(dev);
-        if (ret != 0) {
-            goto out_error;
-        }
-
-        bytes_sent += chunk_size;
-    }
-
-out_error:
-    if (area != NULL) {
-        kfree(area);
-    }
     if (cbw != NULL) {
         kfree(cbw);
     }
@@ -382,15 +296,11 @@ out_error:
 static void it8951_display_update(struct fb_info *info, struct list_head *pagelist)
 {
     struct it8951_device *dev = info->par;
+    int ret;
 
     /* Prevent crash on USB disconnection */
     if (!dev->connected) {
         return;
-    }
-
-    if (list_empty(pagelist)) {
-        dev_err(&dev->interface->dev, "Requested refresh with empty pages list!\n");
-//        return;
     }
 
     // TODO convert to grayscale
@@ -402,17 +312,22 @@ static void it8951_display_update(struct fb_info *info, struct list_head *pageli
         size_t pixel = i % info->fix.line_length;
         size_t img_offset = (row + 1) * info->fix.line_length - pixel - 1;
 
-        dev->img_video_buf[img_offset] = dev->fb_video_buf[i];
+        dev->img_video_buf[img_offset] = (dev->fb_video_buf[i] > 0x00) ? 0xF0 : 0x00;
     }
 
-//    it8951_image_load(dev, dev->img_video_buf, 0, 0, 1440, 720);
-    it8951_image_load_fast(dev, dev->img_video_buf, 0, 0, 1440, 720);
-    it8951_display_refresh(dev, 2, 0, 0, 1440, 720); // TODO check return
+    ret = it8951_image_load_fast(dev, dev->img_video_buf, 0, 0, dev->width, dev->height);
+    if (ret != 0) {
+        dev_err(&dev->interface->dev, "Failed to transfer image to controller, error: %d!\n", ret);
+        return;
+    }
+    ret = it8951_display_refresh(dev, REFRESH_DU2, 0, 0, dev->width, dev->height);
+    if (ret != 0) {
+        dev_err(&dev->interface->dev, "Failed to refresh, error: %d!\n", ret);
+    }
 }
 
 static ssize_t it8951_write(struct fb_info *p, const char __user *buf, size_t count, loff_t *ppos)
 {
-    printk("write\n");
     ssize_t ret;
 
     ret = fb_sys_write(p, buf, count, ppos);
@@ -423,21 +338,18 @@ static ssize_t it8951_write(struct fb_info *p, const char __user *buf, size_t co
 
 static void it8951_fillrect(struct fb_info *p, const struct fb_fillrect *rect)
 {
-    printk("fillrect\n");
     sys_fillrect(p, rect);
     schedule_delayed_work(&p->deferred_work, p->fbdefio->delay);
 }
 
 static void it8951_copyarea(struct fb_info *p, const struct fb_copyarea *area)
 {
-    printk("copyarea\n");
     sys_copyarea(p, area);
     schedule_delayed_work(&p->deferred_work, p->fbdefio->delay);
 }
 
 static void it8951_imageblit(struct fb_info *p, const struct fb_image *image)
 {
-    printk("imageblit x: %d y: %d w: %d h: %d\n", image->dx, image->dy, image->width, image->height);
     sys_imageblit(p, image);
     schedule_delayed_work(&p->deferred_work, p->fbdefio->delay);
 }
@@ -452,7 +364,7 @@ static int it8951_setcolreg(unsigned regno, unsigned r, unsigned g, unsigned b, 
     }
 
     // TODO grayscale
-    // TODO clean those magic numbers up
+    // TODO clean those magic numbers up, add TO_HW macro
 
     /* Create pseudo-palette */
     if (info->fix.visual == FB_VISUAL_TRUECOLOR) {
@@ -481,7 +393,7 @@ static struct fb_ops it8951_fb_fops = {
 };
 
 static struct fb_deferred_io it8951_fb_defio = {
-        .delay	= HZ / 2,
+        .delay	= HZ / 4,
         .deferred_io = &it8951_display_update,
 };
 
