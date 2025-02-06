@@ -265,6 +265,65 @@ out_error:
     return ret;
 }
 
+static int it8951_image_load_fast(const struct it8951_device *dev, uint8_t *image, size_t x, size_t y, size_t w, size_t h)
+{
+    struct cmd_block_wrapper *cbw;
+    size_t offset = 0;
+    size_t bytes_left;
+    size_t chunk_size;
+    int ret;
+
+    /* Create command block wrapper */
+    cbw = it8951_create_cbw(DIR_BULK_OUT, 0);
+    if (cbw == NULL) {
+        ret = -ENOMEM;
+        goto out_error;
+    }
+    cbw->cmd_data[0] = IT8951_DRV_CUSTOM_CMD;
+    cbw->cmd_data[6] = IT8951_DRV_FAST_WRITE_MEM_OP;
+
+    /* Total image size */
+    bytes_left = w * h;
+
+    /* Send data in chunks of at most IT8951_DRV_MAX_BLOCK_SIZE bytes */
+    while (bytes_left > 0) {
+        chunk_size = min(IT8951_DRV_MAX_BLOCK_SIZE, bytes_left);
+
+        /* Fill command block wrapper data */
+        cbw->data_transfer_length = chunk_size;
+        *(uint32_t *)&cbw->cmd_data[2] = cpu_to_be32(dev->img_mem_addr + offset);
+        *(uint32_t *)&cbw->cmd_data[7] = cpu_to_be16(chunk_size);
+
+        /* Send command block wrapper */
+        ret = it8951_drv_usb_bulk_send(dev, cbw, sizeof(*cbw));
+        if (ret != 0) {
+            goto out_error;
+        }
+
+        /* Send image data */
+        ret = it8951_drv_usb_bulk_send(dev, &image[offset], chunk_size);
+        if (ret != 0) {
+            goto out_error;
+        }
+
+        /* Check command status */
+        ret = it8951_read_csw(dev);
+        if (ret != 0) {
+            goto out_error;
+        }
+
+        bytes_left -= chunk_size;
+        offset += chunk_size;
+    }
+
+out_error:
+    if (cbw != NULL) {
+        kfree(cbw);
+    }
+
+    return ret;
+}
+
 static int it8951_display_refresh(const struct it8951_device *dev, enum it8951_refresh_mode mode, size_t x, size_t y, size_t w, size_t h)
 {
     struct cmd_block_wrapper *cbw = NULL;
@@ -346,7 +405,8 @@ static void it8951_display_update(struct fb_info *info, struct list_head *pageli
         dev->img_video_buf[img_offset] = dev->fb_video_buf[i];
     }
 
-    it8951_image_load(dev, dev->img_video_buf, 0, 0, 1440, 720);
+//    it8951_image_load(dev, dev->img_video_buf, 0, 0, 1440, 720);
+    it8951_image_load_fast(dev, dev->img_video_buf, 0, 0, 1440, 720);
     it8951_display_refresh(dev, 2, 0, 0, 1440, 720); // TODO check return
 }
 
