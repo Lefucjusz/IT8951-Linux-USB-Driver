@@ -5,15 +5,11 @@
 #include <linux/usb.h>
 #include <linux/fb.h>
 #include <linux/time.h>
-#include <linux/moduleparam.h>
 #include "it8951_types.h"
 
-// TODO RGB888 to gray2/gray4
-// TODO add parameter to set VCOM
-// TODO check gotos and memory freeing
+// TODO RGB888 to gray2/gray4 for other displays
 // TODO add partial updates
-// TODO clear display before disconnecting
-// TODO use grayscale for now and add periodic deep refresh
+// TODO clear display before disconnecting 
 
 /* Driver name */
 #define IT8951_DRV_ID "eink_usb_disp"
@@ -40,11 +36,12 @@
 #define IT8951_DRV_GET_SYS_VERSION 0x00020001
 
 /* Maximum memory transfer size for IT8951 */
-#define IT8951_DRV_MAX_BLOCK_SIZE (60 * 1024)
+#define IT8951_DRV_MAX_BLOCK_SIZE (60 * 1024U)
 
 /* General defines */
 #define IT8951_DRV_BITS_PER_BYTE 8
 #define IT8951_DRV_DEFAULT_VCOM 2480
+#define IT8951_DRV_MAX_FAST_REFRESHES 100
 
 /* Macros */
 #define ROUND_DOWN_TO_MULTIPLE(x, mul) (((x) / (mul)) * (mul))
@@ -54,12 +51,19 @@ static int vcom_value_mv = IT8951_DRV_DEFAULT_VCOM;
 module_param(vcom_value_mv, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(vcom_value_mv, "VCOM voltage value in mV, without sign");
 
+static int max_fast_refreshes = IT8951_DRV_MAX_FAST_REFRESHES;
+module_param(max_fast_refreshes, int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(max_fast_refreshes, "Number of fast refreshes before a deep refresh occurs");
+
+
 static const struct usb_device_id it8951_usb_ids[] = {
         {USB_DEVICE(IT8951_DRV_USB_VID, IT8951_DRV_USB_PID)},
         { }
 };
 
 MODULE_DEVICE_TABLE(usb, it8951_usb_ids);
+
+static bool device_connected = false;
 
 static struct fb_fix_screeninfo it8951_fix = {
         .id = IT8951_DRV_ID,
@@ -339,10 +343,11 @@ out_error:
 static void it8951_display_update(struct fb_info *info, struct list_head *pagelist)
 {
     struct it8951_device *dev = info->par;
+    enum it8951_refresh_mode refresh_mode;
     int ret;
 
     /* Prevent crash on USB disconnection */
-    if (!dev->connected) {
+    if (!device_connected) {
         return;
     }
 
@@ -355,15 +360,26 @@ static void it8951_display_update(struct fb_info *info, struct list_head *pageli
         size_t pixel = i % info->fix.line_length;
         size_t img_offset = (row + 1) * info->fix.line_length - pixel - 1;
 
-        dev->img_video_buf[img_offset] = (dev->fb_video_buf[i] > 0x00) ? 0xF0 : 0x00;
+        dev->img_video_buf[img_offset] = (dev->fb_video_buf[i] != 0x00) ? 0xF0 : 0x00;
     }
-
+    
+    /* Load image */
     ret = it8951_image_load_fast(dev, dev->img_video_buf, 0, 0, dev->width, dev->height);
     if (ret != 0) {
         dev_err(&dev->interface->dev, "Failed to transfer image to controller, error: %d!\n", ret);
         return;
     }
-    ret = it8951_display_refresh(dev, REFRESH_DU2, 0, 0, dev->width, dev->height);
+	
+    /* Select a refresh mode and perform the refresh */
+    if (dev->fast_refresh_count >= max_fast_refreshes) {
+	dev->fast_refresh_count = 0;
+	refresh_mode = REFRESH_GC16;
+    }
+    else {
+	++dev->fast_refresh_count;
+	refresh_mode = REFRESH_DU2;
+    }
+    ret = it8951_display_refresh(dev, refresh_mode, 0, 0, dev->width, dev->height);
     if (ret != 0) {
         dev_err(&dev->interface->dev, "Failed to refresh, error: %d!\n", ret);
     }
@@ -397,7 +413,7 @@ static void it8951_imageblit(struct fb_info *p, const struct fb_image *image)
     schedule_delayed_work(&p->deferred_work, p->fbdefio->delay);
 }
 
-/* This is needed for fbcon to work */
+/* This is needed for fbcon to work in TRUECOLOR or DIRECTCOLOR visual */
 static int it8951_setcolreg(unsigned regno, unsigned r, unsigned g, unsigned b, unsigned alpha, struct fb_info *info)
 {
     uint32_t val;
@@ -406,18 +422,16 @@ static int it8951_setcolreg(unsigned regno, unsigned r, unsigned g, unsigned b, 
         return -EINVAL;
     }
 
-    // TODO grayscale
-    // TODO clean those magic numbers up, add TO_HW macro
-
     /* Create pseudo-palette */
-    if (info->fix.visual == FB_VISUAL_TRUECOLOR) {
+    if ((info->fix.visual == FB_VISUAL_TRUECOLOR) || (info->fix.visual == FB_VISUAL_DIRECTCOLOR)) {
         if (regno > 15) {
             return -EINVAL;
         }
 
-        val = (r << 5);
-        val |= (g << 2);
-        val |= (b << 0);
+        val = (r << info->var.red.offset) | 
+	      (g << info->var.green.offset) |
+	      (b << info->var.blue.offset);
+
 
         ((uint32_t *)info->pseudo_palette)[regno] = val;
     }
@@ -446,7 +460,7 @@ static int it8951_drv_usb_probe(struct usb_interface *interface, const struct us
     struct usb_endpoint_descriptor *bulk_in;
     struct usb_endpoint_descriptor *bulk_out;
     struct it8951_dev_info *info;
-    int ret = 0;
+    int ret;
 
     /* Create device */
     dev = kzalloc(sizeof(*dev), GFP_KERNEL);
@@ -488,7 +502,7 @@ static int it8951_drv_usb_probe(struct usb_interface *interface, const struct us
     dev->img_mem_addr = be32_to_cpu(info->img_buf_addr);
     dev->fb_video_buf_size = dev->width * dev->height * it8951_var.bits_per_pixel / IT8951_DRV_BITS_PER_BYTE;
     dev->img_video_buf_size = dev->width * dev->height; // IT8951 always expects 1 byte per pixel
-
+    
     /* Power on the display and set VCOM value */
     ret = it8951_set_vcom(dev, vcom_value_mv);
     if (ret != 0) {
@@ -511,6 +525,9 @@ static int it8951_drv_usb_probe(struct usb_interface *interface, const struct us
         dev_err(&interface->dev, "Failed to clear display, error: %d!\n", ret);
         goto usb_error;
     }
+
+    /* Force first refresh to be deep */
+    dev->fast_refresh_count = max_fast_refreshes; // TODO this is a workaround probably needed only for a specific display
 
     /* Allocate framebuffer */
     dev->fbinfo = framebuffer_alloc(0, &interface->dev);
@@ -571,7 +588,7 @@ static int it8951_drv_usb_probe(struct usb_interface *interface, const struct us
     }
 
     /* Success! */
-    dev->connected = true;
+    device_connected = true;
 
     dev_info(&interface->dev, "IT8951 E-Ink USB display connected!\n");
     goto success;
@@ -602,7 +619,7 @@ static void it8951_drv_usb_disconnect(struct usb_interface *interface)
     usb_set_intfdata(interface, NULL);
 
     /* Device is not connected anymore */
-    dev->connected = false;
+    device_connected = false;
 
     if (dev != NULL) {
         dev_info(&interface->dev, "Cleaning up...\n");

@@ -30,7 +30,6 @@ struct it8951_device
     struct usb_interface *interface;
     uint8_t bulk_in_addr;
     uint8_t bulk_out_addr;
-    bool connected;
 
     /* IT8951-related data */
     uint32_t img_mem_addr;
@@ -38,6 +37,7 @@ struct it8951_device
     size_t img_video_buf_size;
     size_t width;
     size_t height;
+    size_t fast_refresh_count;
 
     /* Framebuffer-related data */
     struct fb_info *fbinfo;
