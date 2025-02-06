@@ -5,6 +5,7 @@
 #include <linux/usb.h>
 #include <linux/fb.h>
 #include <linux/time.h>
+#include <linux/moduleparam.h>
 #include "it8951_types.h"
 
 // TODO RGB888 to gray2/gray4
@@ -43,8 +44,15 @@
 
 /* General defines */
 #define IT8951_DRV_BITS_PER_BYTE 8
+#define IT8951_DRV_DEFAULT_VCOM 2480
 
+/* Macros */
 #define ROUND_DOWN_TO_MULTIPLE(x, mul) (((x) / (mul)) * (mul))
+
+/* Parameters */
+static int vcom_value_mv = IT8951_DRV_DEFAULT_VCOM;
+module_param(vcom_value_mv, int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(vcom_value_mv, "VCOM voltage value in mV, without sign");
 
 static const struct usb_device_id it8951_usb_ids[] = {
         {USB_DEVICE(IT8951_DRV_USB_VID, IT8951_DRV_USB_PID)},
@@ -164,6 +172,41 @@ static int it8951_get_info(const struct it8951_device *dev, struct it8951_dev_in
 
     /* Receive info */
     ret = it8951_drv_usb_bulk_recv(dev, info, sizeof(*info));
+    if (ret != 0) {
+        goto out_error;
+    }
+
+    /* Check command status */
+    ret = it8951_read_csw(dev);
+
+out_error:
+    if (cbw != NULL) {
+        kfree(cbw);
+    }
+
+    return ret;
+}
+
+static int it8951_set_vcom(const struct it8951_device *dev, int16_t vcom_value)
+{
+    struct cmd_block_wrapper *cbw;
+    int ret;
+
+    /* Create command block wrapper */
+    cbw = it8951_create_cbw(DIR_BULK_OUT, 0);
+    if (cbw == NULL) {
+        ret = -ENOMEM;
+        goto out_error;
+    }
+    cbw->cmd_data[0] = IT8951_DRV_CUSTOM_CMD;
+    cbw->cmd_data[6] = IT8951_DRV_PMIC_CTRL_OP;
+    *(uint16_t *)&cbw->cmd_data[7] = cpu_to_be16(vcom_value);
+    cbw->cmd_data[9] = 1; // 1 - set VCOM value, 0 - ignore
+    cbw->cmd_data[10] = 1; // 1 - set power flag, 0 - ignore
+    cbw->cmd_data[11] = 1; // 1 - power on, 0 - power off
+
+    /* Send command block wrapper */
+    ret = it8951_drv_usb_bulk_send(dev, cbw, sizeof(*cbw));
     if (ret != 0) {
         goto out_error;
     }
@@ -446,10 +489,19 @@ static int it8951_drv_usb_probe(struct usb_interface *interface, const struct us
     dev->fb_video_buf_size = dev->width * dev->height * it8951_var.bits_per_pixel / IT8951_DRV_BITS_PER_BYTE;
     dev->img_video_buf_size = dev->width * dev->height; // IT8951 always expects 1 byte per pixel
 
+    /* Power on the display and set VCOM value */
+    ret = it8951_set_vcom(dev, vcom_value_mv);
+    if (ret != 0) {
+        dev_err(&interface->dev, "Failed to set VCOM value, error: %d!\n", ret);
+        kfree(info);
+        goto usb_error;
+    }
+
     dev_info(&interface->dev, "Controller info:\n");
     dev_info(&interface->dev, "\tCommand table version: 0x%08X\n", be32_to_cpu(info->version));
     dev_info(&interface->dev, "\tResolution: %zupx x %zupx\n", dev->width, dev->height);
     dev_info(&interface->dev, "\tImage buffer address: 0x%08X\n", dev->img_mem_addr);
+    dev_info(&interface->dev, "\tVCOM value: -%umV\n", vcom_value_mv);
 
     kfree(info);
 

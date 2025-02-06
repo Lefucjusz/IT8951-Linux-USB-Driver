@@ -90,7 +90,7 @@ enum it8951_cmd_dir
     DIR_BULK_IN = 0x80
 };
 
-enum it8951_refresh_mode // TODO these are probably incorrect
+enum it8951_refresh_mode
 {
     REFRESH_INIT = 0,
     REFRESH_DU2,

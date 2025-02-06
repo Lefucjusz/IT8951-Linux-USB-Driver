@@ -1,0 +1,13 @@
+# Ignore all kind of files
+*
+
+# Except for those
+!*.c
+!*.h
+!*.md
+!Makefile
+!LICENSE
+!.gitignore
+
+# Ignore .mod.c too
+*.mod.c
