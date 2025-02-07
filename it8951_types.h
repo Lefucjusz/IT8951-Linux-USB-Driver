@@ -1,9 +1,5 @@
 #pragma once
 
-#include <linux/usb.h>
-#include <linux/fb.h>
-#include <linux/types.h>
-
 struct cmd_block_wrapper
 {
     uint32_t signature;
@@ -39,11 +35,11 @@ struct it8951_device
     size_t height;
     size_t fast_refresh_count;
 
-    /* Framebuffer-related data */
-    struct fb_info *fbinfo;
-    uint8_t *fb_video_buf;
-    size_t fb_video_buf_size;
-    uint32_t pseudo_palette[16];
+    /* DRM-related data */
+    struct drm_device drm;
+    struct drm_simple_display_pipe pipe;
+    struct drm_connector connector;
+    struct drm_display_mode mode;
 };
 
 struct it8951_dev_info

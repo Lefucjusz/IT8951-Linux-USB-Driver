@@ -16,5 +16,5 @@ clean:
 
 else
     # called from kernel build system: just declare what our modules are
-    obj-m := it8951_drv.o
+    obj-m := it8951_disp.o
 endif
