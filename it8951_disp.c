@@ -73,7 +73,7 @@ static int max_fast_refreshes = IT8951_DISP_MAX_FAST_REFRESHES;
 module_param(max_fast_refreshes, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(max_fast_refreshes, "Number of fast refreshes before a deep refresh occurs");
 
-// #define USE_DITHERING // TODO dithering seems to not work very well with my display, disable for now
+#define USE_DITHERING
 
 static int it8951_disp_usb_bulk_send(const struct it8951_device *dev, void *data, size_t size)
 {
@@ -357,12 +357,12 @@ static void it8951_disp_image_mirror(uint8_t *buffer, size_t width, size_t heigh
 
 #if defined(USE_DITHERING)
 
-static uint8_t it8951_disp_add_saturate(int8_t x, int8_t y)
+static uint8_t it8951_disp_add_saturate(int16_t x, int16_t y)
 {
     return CLAMP(x + y, IT8951_DITHER_BLACK, IT8951_DITHER_WHITE);
 }
 
-static void it8951_disp_sum_pixel(uint8_t *buffer, int8_t value, size_t x, size_t y, size_t width, size_t height)
+static void it8951_disp_sum_pixel(uint8_t *buffer, int16_t value, size_t x, size_t y, size_t width, size_t height)
 {
     if ((x >= width) || (y >= height)) {
         return;
@@ -373,7 +373,7 @@ static void it8951_disp_sum_pixel(uint8_t *buffer, int8_t value, size_t x, size_
 static void it8951_disp_image_dither(uint8_t *buffer, size_t width, size_t height)
 {
     uint8_t pixel_orig, pixel_quant;
-    int8_t error;
+    int16_t error;
     size_t x, y;
 
     for (y = 0; y < height; ++y) {
@@ -395,7 +395,7 @@ static void it8951_disp_image_dither(uint8_t *buffer, size_t width, size_t heigh
     }
 }
 
-#endif
+#else
 
 static void it8951_disp_image_quantize(uint8_t *buffer, size_t width, size_t height)
 {
@@ -406,14 +406,16 @@ static void it8951_disp_image_quantize(uint8_t *buffer, size_t width, size_t hei
     }
 }
 
+#endif
+
 static void it8951_disp_image_transform(uint8_t *buffer, size_t width, size_t height)
 {
-    it8951_disp_image_mirror(buffer, width, height);
 #if defined(USE_DITHERING)
-    it8951_disp_image_dither(buffer, width, height);
+        it8951_disp_image_dither(buffer, width, height);
 #else
-    it8951_disp_image_quantize(buffer, width, height);
+        it8951_disp_image_quantize(buffer, width, height);
 #endif
+    it8951_disp_image_mirror(buffer, width, height);
 }
 
 static void it8951_disp_fb_dirty(struct drm_framebuffer *fb, const struct iosys_map *vmap, struct drm_rect *rect)
